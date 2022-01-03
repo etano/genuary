@@ -7,8 +7,14 @@ use rand_pcg::Pcg64;
 const SEED: u64 = 12345;
 const WINDOW_X: u32 = 1000;
 const WINDOW_Y: u32 = 1000;
-const STELLAR_HALF_LIFE: u32 = 100000;
-const N_INITIAL_STARS: u32 = 100;
+const N_VISIBLE_STARS: u32 = 1000;
+const MIN_STAR_PIXELS: f32 = 2.0;
+const MAX_STAR_PIXELS: f32 = 200.0;
+const MAX_TWINKLE_PIXELS: f32 = 5.0;
+const MAX_WARP_SPEED: f32 = 300.0;
+const MIN_WARP_SPEED: f32 = -30.0;
+const WARP_SPEED_DELTA: f32 = 3.0;
+const INITIAL_WARP_SPEED: f32 = MAX_WARP_SPEED;
 
 #[derive(Copy, Clone)]
 struct Star {
@@ -16,14 +22,19 @@ struct Star {
     h: f32,
     x: f32,
     y: f32,
+    angle: f32,
     age: u32,
-    is_dead: bool
+    is_visible: bool
 }
 
 struct Model {
     _window: window::Id,
+    wx: f32,
+    wy: f32,
     rng: rand_pcg::Pcg64,
-    stars: Vec<Star>
+    stars: Vec<Star>,
+    warp_speed: f32,
+    warp_speed_delta: f32
 }
 
 fn model(app: &App) -> Model {
@@ -33,29 +44,38 @@ fn model(app: &App) -> Model {
         .view(view)
         .build()
         .unwrap();
-    let mut rng = Pcg64::seed_from_u64(SEED);
-    let mut stars: Vec<Star> = Vec::new();
-    for _ in 1..=N_INITIAL_STARS {
-        let star: Star = create_star(app, &mut rng);
-        stars.push(star);
-    }
+    let rng = Pcg64::seed_from_u64(SEED);
+    let wh = app.window_rect().wh();
+    let wx = wh.x;
+    let wy = wh.y;
+    let stars: Vec<Star> = Vec::new();
+    let warp_speed = INITIAL_WARP_SPEED;
+    let warp_speed_delta = INITIAL_WARP_SPEED.signum() * WARP_SPEED_DELTA;
 
     Model {
         _window,
+        wx,
+        wy,
         rng,
-        stars
+        stars,
+        warp_speed,
+        warp_speed_delta
     }
 }
 
-fn create_star(_app: &App, rng: &mut Pcg64) -> Star {
-    let wh = _app.window_rect().wh();
+fn create_star(_model: &mut Model) -> Star {
+    let x: f32 = _model.rng.gen_range(-(_model.wx / 2.0)..(_model.wx / 2.0));
+    let y: f32 = _model.rng.gen_range(-(_model.wy / 2.0)..(_model.wy / 2.0));
+    let vx: f32 = _model.warp_speed * x / _model.wx as f32;
+    let vy: f32 = _model.warp_speed * y / _model.wy as f32;
     Star{
-        w: rng.gen_range(1.0..3.0),
-        h: rng.gen_range(1.0..3.0),
-        x: rng.gen_range(0..wh.x as usize) as f32 - (wh.x / 2.0),
-        y: rng.gen_range(0..wh.y as usize) as f32 - (wh.y / 2.0),
+        w: ((vx*vx + vy*vy).sqrt() + MIN_STAR_PIXELS).min(MAX_STAR_PIXELS),
+        h: MIN_STAR_PIXELS,
+        x: x,
+        y: y,
+        angle: (y/x).atan(),
         age: 0,
-        is_dead: false
+        is_visible: true
     }
 }
 
@@ -63,30 +83,44 @@ fn evolve_stars(_model: &mut Model) {
     for star in _model.stars.iter_mut() {
         star.age += 1;
 
-        // twinkle
-        star.w = _model.rng.gen_range(1.0..3.0);
-        star.h = _model.rng.gen_range(1.0..3.0);
+        // move
+        let vx = _model.warp_speed * star.x / _model.wx;
+        let vy = _model.warp_speed * star.y / _model.wy;
+        star.x += vx;
+        star.y += vy;
+        star.angle = (star.y/star.x).atan();
 
-        // enforce half-life
-        let p: f32 = 0.5f32.powf(star.age as f32 / STELLAR_HALF_LIFE as f32);
-        if _model.rng.gen::<f32>() > p {
-            star.is_dead = true;
+        // twinkle
+        star.w = ((vx.pow(2.0) + vy.pow(2.0)).sqrt() + MIN_STAR_PIXELS).min(MAX_STAR_PIXELS);
+        star.h = MIN_STAR_PIXELS;
+
+        // enforce death
+        if star.x.abs() - star.w < _model.wx || star.y.abs() - star.w < _model.wy {
+            star.is_visible = true;
+        } else {
+            star.is_visible = false;
         }
     }
 }
 
 fn update(_app: &App, _model: &mut Model, _update: Update) {
     // remove dead stars
-    _model.stars.retain(|s| !s.is_dead);
+    _model.stars.retain(|s| s.is_visible);
+
+    // randomly choose parameters for a new star
+    while _model.stars.len() < N_VISIBLE_STARS as usize {
+        let star: Star = create_star(_model);
+        _model.stars.push(star);
+    }
+
+    // adjust warp speed
+    if _model.warp_speed > MAX_WARP_SPEED || _model.warp_speed < MIN_WARP_SPEED {
+        _model.warp_speed_delta *= -1.0;
+    }
+    _model.warp_speed += _model.warp_speed_delta;
 
     // evolve existing stars
     evolve_stars(_model);
-
-    // randomly choose parameters for a new star
-    let star: Star = create_star(_app, &mut _model.rng);
-    _model.stars.push(star);
-
-    println!("stars: {}", _model.stars.len());
 }
 
 fn view(app: &App, _model: &Model, frame: Frame) {
@@ -94,7 +128,7 @@ fn view(app: &App, _model: &Model, frame: Frame) {
     draw.background().color(BLACK);
 
     for star in _model.stars.iter() {
-        draw.ellipse().color(WHITE).w(star.w).h(star.h).x_y(star.x, star.y);
+        draw.ellipse().color(WHITE).w(star.w).h(star.h).x_y(star.x, star.y).rotate(star.angle);
     }
 
     draw.to_frame(app, &frame).unwrap();
