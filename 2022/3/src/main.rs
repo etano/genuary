@@ -7,21 +7,17 @@ use rand_pcg::Pcg64;
 const SEED: u64 = 12345;
 const WINDOW_X: u32 = 1000;
 const WINDOW_Y: u32 = 1000;
-
-#[derive(Copy, Clone)]
-enum StarStage {
-    BIRTH,
-    YOUTH,
-    MATURITY,
-    DEATH
-}
+const STELLAR_HALF_LIFE: u32 = 100000;
+const N_INITIAL_STARS: u32 = 100;
 
 #[derive(Copy, Clone)]
 struct Star {
+    w: f32,
+    h: f32,
     x: f32,
     y: f32,
-    stage: StarStage,
-    age: u32
+    age: u32,
+    is_dead: bool
 }
 
 struct Model {
@@ -37,8 +33,12 @@ fn model(app: &App) -> Model {
         .view(view)
         .build()
         .unwrap();
-    let rng = Pcg64::seed_from_u64(SEED);
-    let stars: Vec<Star> = Vec::new();
+    let mut rng = Pcg64::seed_from_u64(SEED);
+    let mut stars: Vec<Star> = Vec::new();
+    for _ in 1..=N_INITIAL_STARS {
+        let star: Star = create_star(app, &mut rng);
+        stars.push(star);
+    }
 
     Model {
         _window,
@@ -47,37 +47,44 @@ fn model(app: &App) -> Model {
     }
 }
 
-fn evolve_star(star: &mut Star) {
-    star.age += 1;
-    // println!("{}", star.age);
-    match star.stage {
-        StarStage::BIRTH => {
-            if star.age > 10 {
-                star.stage = StarStage::YOUTH;
-            }
-        },
-        StarStage::YOUTH => { star.stage = StarStage::MATURITY; },
-        StarStage::MATURITY => { star.stage = StarStage::DEATH; },
-        StarStage::DEATH => { star.stage = StarStage::DEATH; }
+fn create_star(_app: &App, rng: &mut Pcg64) -> Star {
+    let wh = _app.window_rect().wh();
+    Star{
+        w: rng.gen_range(1.0..3.0),
+        h: rng.gen_range(1.0..3.0),
+        x: rng.gen_range(0..wh.x as usize) as f32 - (wh.x / 2.0),
+        y: rng.gen_range(0..wh.y as usize) as f32 - (wh.y / 2.0),
+        age: 0,
+        is_dead: false
+    }
+}
+
+fn evolve_stars(_model: &mut Model) {
+    for star in _model.stars.iter_mut() {
+        star.age += 1;
+
+        // twinkle
+        star.w = _model.rng.gen_range(1.0..3.0);
+        star.h = _model.rng.gen_range(1.0..3.0);
+
+        // enforce half-life
+        let p: f32 = 0.5f32.powf(star.age as f32 / STELLAR_HALF_LIFE as f32);
+        if _model.rng.gen::<f32>() > p {
+            star.is_dead = true;
+        }
     }
 }
 
 fn update(_app: &App, _model: &mut Model, _update: Update) {
     // remove dead stars
-    _model.stars.retain(|s| !matches!(s.stage, StarStage::DEATH));
+    _model.stars.retain(|s| !s.is_dead);
 
     // evolve existing stars
-    for star in _model.stars.iter_mut() {
-        evolve_star(star);
-    }
+    evolve_stars(_model);
 
-    // randomly choose coordinates for a new star
-    let wh = _app.window_rect().wh();
-    let x: f32 = _model.rng.gen_range(0..wh.x as usize) as f32 - (wh.x / 2.0);
-    let y: f32 = _model.rng.gen_range(0..wh.y as usize) as f32 - (wh.y / 2.0);
-
-    println!("x, y: {}, {}", x, y);
-    _model.stars.push(Star{x: x, y: y, stage: StarStage::BIRTH, age: 0});
+    // randomly choose parameters for a new star
+    let star: Star = create_star(_app, &mut _model.rng);
+    _model.stars.push(star);
 
     println!("stars: {}", _model.stars.len());
 }
@@ -87,7 +94,7 @@ fn view(app: &App, _model: &Model, frame: Frame) {
     draw.background().color(BLACK);
 
     for star in _model.stars.iter() {
-        draw.ellipse().color(WHITE).w(2.0).h(2.0).x_y(star.x, star.y);
+        draw.ellipse().color(WHITE).w(star.w).h(star.h).x_y(star.x, star.y);
     }
 
     draw.to_frame(app, &frame).unwrap();
