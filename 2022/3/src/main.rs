@@ -11,9 +11,9 @@ const N_VISIBLE_STARS: u32 = 1000;
 const MIN_STAR_PIXELS: f32 = 2.0;
 const MAX_STAR_PIXELS: f32 = 200.0;
 const MAX_TWINKLE_PIXELS: f32 = 5.0;
-const MAX_WARP_SPEED: f32 = 300.0;
-const MIN_WARP_SPEED: f32 = -30.0;
-const WARP_SPEED_DELTA: f32 = 3.0;
+const MAX_WARP_SPEED: f32 = 500.0;
+const MIN_WARP_SPEED: f32 = -50.0;
+const WARP_SPEED_DELTA: f32 = 5.0;
 const INITIAL_WARP_SPEED: f32 = MAX_WARP_SPEED;
 
 #[derive(Copy, Clone)]
