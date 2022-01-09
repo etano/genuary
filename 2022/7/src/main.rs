@@ -167,9 +167,9 @@ fn update(_app: &App, _model: &mut Model, _update: Update) {
 
 fn view(app: &App, _model: &Model, frame: Frame) {
     let draw = app.draw();
-    draw.background().color(WHITE);
+    draw.background().color(BLACK);
     for line in _model.lines.iter() {
-        draw.line().color(BLACK).weight(1.0).start(line.start).end(line.end);
+        draw.line().color(PINK).weight(1.0).start(line.start).end(line.end);
     }
     draw.to_frame(app, &frame).unwrap();
 
