@@ -6,15 +6,15 @@ use rand::prelude::*;
 use rand_pcg::Pcg64;
 
 const SEED: u64 = 12345;
-const WINDOW_WIDTH: f32 = 1000.0;
-const WINDOW_HEIGHT: f32 = 1000.0;
+const WINDOW_WIDTH: f32 = 600.0;
+const WINDOW_HEIGHT: f32 = 600.0;
 const SQUARE_WIDTH: f32 = 500.0;
 const SQUARE_HEIGHT: f32 = 500.0;
 const SPIN_WIDTH_X: f32 = 1.0;
 const SPIN_WIDTH_Y: f32 = 1.0;
 const BETA_C: f32 = 0.440686793509772; // (2.).sqrt().ln_1p() / 2.;
 const BETA_START: f32 = 0.5 * BETA_C;
-const BETA_END: f32 = 1.5 * BETA_C;
+const BETA_END: f32 = 2.0 * BETA_C;
 const N_STEPS: usize = 100;
 
 struct Model {
@@ -147,12 +147,12 @@ fn update(_app: &App, _model: &mut Model, _update: Update) {
 }
 
 fn get_rgba(pixel_x: usize, pixel_y: usize, _model: &Model) -> [u8; 4] {
-    let x = (pixel_x as f32 + _model.x0) / _model.w_x;
-    let y = (pixel_y as f32 + _model.y0) / _model.w_y;
-    if 0.0 <= x && x < _model.n_x as f32 && 0.0 <= y && y < _model.n_y as f32 {
+    let x = pixel_x as f32 - 0.5 * WINDOW_WIDTH;
+    let y = pixel_y as f32 - 0.5 * WINDOW_HEIGHT;
+    if _model.x0 <= x && x < _model.x1 && _model.y0 <= y && y < _model.y1 {
         // println!("pixel_x: {}, pixel_y: {}, x: {}, y: {}", pixel_x, pixel_y, x, y);
-        let i: usize = x as usize;
-        let j: usize = y as usize;
+        let i: usize = ((x - _model.x0) / _model.w_x) as usize;
+        let j: usize = ((y - _model.y0) / _model.w_y) as usize;
         let val = _model.a[[i, j]];
         if val == -1 {
             _model.down_rgba
