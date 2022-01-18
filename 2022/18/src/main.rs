@@ -6,26 +6,23 @@ use rand::prelude::*;
 use rand_pcg::Pcg64;
 
 const SEED: u64 = 12345;
-const WINDOW_WIDTH: f32 = 1000.0;
-const WINDOW_HEIGHT: f32 = 1000.0;
-const SQUARE_WIDTH: f32 = 900.0;
-const SQUARE_HEIGHT: f32 = 900.0;
+const WINDOW_WIDTH: f32 = 600.0;
+const WINDOW_HEIGHT: f32 = 600.0;
+const SQUARE_WIDTH: f32 = 500.0;
+const SQUARE_HEIGHT: f32 = 500.0;
 const SPIN_WIDTH_X: f32 = 1.0;
 const SPIN_WIDTH_Y: f32 = 1.0;
 const BETA_C: f32 = 0.440686793509772; // (2.).sqrt().ln_1p() / 2.;
-const BETA_START: f32 = 0.1 * BETA_C;
+const BETA_START: f32 = 0.5 * BETA_C;
 const BETA_END: f32 = 2.0 * BETA_C;
 const HOTSPOT_PATH_RADIUS: f32 = 150.0;
-const HOTSPOT_RADIUS: f32 = 100.0;
-const N_HOTSPOTS: usize = 2;
-const N_STEPS: usize = 100;
-const N_STATES: usize = 5;
+const HOTSPOT_RADIUS: f32 = 50.0;
+const N_HOTSPOTS: usize = 360;
+const N_STEPS: usize = 300;
+const N_STATES: usize = 2;
 const RGBAS: [[u8; 4]; N_STATES] = [
-    [255, 48, 50, u8::MAX],
-    [255, 96, 101, u8::MAX],
-    [255, 141, 151, u8::MAX],
-    [255, 192, 203, u8::MAX],
-    [255, 255, 255, u8::MAX]
+    [0, 0, 0, u8::MAX],
+    [u8::MAX, u8::MAX, u8::MAX, u8::MAX]
 ];
 
 struct Model {
@@ -42,6 +39,8 @@ struct Model {
     rgbas: [[u8; 4]; N_STATES],
     a: Array<i8, Ix2>,
     beta: Array<f32, Ix2>,
+    global_beta: f32,
+    beta_delta: f32,
     hotspots: Vec<[f32; 3]>,
     n_steps: usize,
     rng: rand_pcg::Pcg64,
@@ -55,7 +54,7 @@ fn model(app: &App) -> Model {
         .view(view)
         .build()
         .unwrap();
-    let mut rng = Pcg64::seed_from_u64(SEED);
+    let rng = Pcg64::seed_from_u64(SEED);
     let window = app.main_window();
 
     let offset_x = (WINDOW_WIDTH - SQUARE_WIDTH) / 2.0;
@@ -78,10 +77,12 @@ fn model(app: &App) -> Model {
     let mut beta = Array::<f32, Ix2>::zeros((n_x, n_y).f());
     for i in 0..n_x {
         for j in 0..n_y {
-            a[[i, j]] = 0; //rng.gen_range(0..n_states) as i8;
-            beta[[i, j]] = BETA_START;
+            a[[i, j]] = 0;
+            beta[[i, j]] = BETA_END;
         }
     }
+    let global_beta = BETA_END;
+    let beta_delta: f32 = (BETA_END - BETA_START) / N_STEPS as f32;
     let mut hotspots: Vec<[f32; 3]> = Vec::new();
     let mut theta: f32 = 0.0;
     let x_mid = (x1 + x0) / 2.0;
@@ -114,6 +115,8 @@ fn model(app: &App) -> Model {
         rgbas,
         a,
         beta,
+        global_beta,
+        beta_delta,
         hotspots,
         n_steps,
         rng,
@@ -166,10 +169,13 @@ fn update(_app: &App, _model: &mut Model, _update: Update) {
         hs[0] = HOTSPOT_PATH_RADIUS * theta.cos() + x_mid;
         hs[1] = HOTSPOT_PATH_RADIUS * theta.sin() + y_mid;
         hs[2] = theta;
-        //hs[0] = HOTSPOT_PATH_RADIUS * theta.sin() + x_mid;
-        //hs[1] = HOTSPOT_PATH_RADIUS * theta.cos() + y_mid;
-        //println!("x {} y {} theta {}", hs[0], hs[1], theta);
     }
+
+    // increment global beta
+    if _model.global_beta > BETA_END || _model.global_beta < BETA_START {
+        _model.beta_delta *= -1.;
+    }
+    _model.global_beta += _model.beta_delta;
 
     // compute new beta
     for i in 0..n_x {
@@ -181,7 +187,7 @@ fn update(_app: &App, _model: &mut Model, _update: Update) {
             for hs in _model.hotspots.iter() {
                 r = ((hs[0] - x).pow(2) as f32 + (hs[1] - y).pow(2) as f32).sqrt().min(r);
             }
-            _model.beta[[i, j]] = BETA_START * (1.0 - r / max_r).max(0.0) + BETA_END * (r / max_r).min(1.0);
+            _model.beta[[i, j]] = BETA_START * (1.0 - r / max_r).max(0.0) + _model.global_beta * (r / max_r).min(1.0);
         }
     }
 }
@@ -220,21 +226,21 @@ fn view(app: &App, _model: &Model, frame: Frame) {
     draw.texture(&_model.texture);
     draw.to_frame(app, &frame).unwrap();
 
-//    // Capture the frame!
-//    let file_path = captured_frame_path(app, &frame);
-//    app.main_window().capture_frame(file_path);
-//}
-//
-//fn captured_frame_path(app: &App, frame: &Frame) -> std::path::PathBuf {
-//    // Create a path that we want to save this frame to.
-//    app.project_path()
-//        .expect("failed to locate `project_path`")
-//        // Capture all frames to a directory called `/<path_to_nannou>/nannou/simple_capture`.
-//        .join(app.exe_name().unwrap())
-//        // Name each file after the number of the frame.
-//        .join(format!("{:03}", frame.nth()))
-//        // The extension will be PNG. We also support tiff, bmp, gif, jpeg, webp and some others.
-//        .with_extension("png")
+    // Capture the frame!
+    let file_path = captured_frame_path(app, &frame);
+    app.main_window().capture_frame(file_path);
+}
+
+fn captured_frame_path(app: &App, frame: &Frame) -> std::path::PathBuf {
+    // Create a path that we want to save this frame to.
+    app.project_path()
+        .expect("failed to locate `project_path`")
+        // Capture all frames to a directory called `/<path_to_nannou>/nannou/simple_capture`.
+        .join(app.exe_name().unwrap())
+        // Name each file after the number of the frame.
+        .join(format!("{:03}", frame.nth()))
+        // The extension will be PNG. We also support tiff, bmp, gif, jpeg, webp and some others.
+        .with_extension("png")
 }
 
 fn main() {
