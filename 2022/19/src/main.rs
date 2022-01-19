@@ -1,5 +1,6 @@
 use nannou::image;
 use nannou::prelude::*;
+use nannou::text::FontSize;
 use ndarray::prelude::*;
 use ndarray::{Array, Ix2};
 use rand::prelude::*;
@@ -13,12 +14,11 @@ const SQUARE_HEIGHT: f32 = 500.0;
 const SPIN_WIDTH_X: f32 = 1.0;
 const SPIN_WIDTH_Y: f32 = 1.0;
 const BETA_C: f32 = 0.440686793509772; // (2.).sqrt().ln_1p() / 2.;
-const BETA_START: f32 = 0.1 * BETA_C;
-const BETA_END: f32 = 2.0 * BETA_C;
-const HOTSPOT_PATH_RADIUS: f32 = 150.0;
+const BETA_START: f32 = 0.01 * BETA_C;
+const BETA_END: f32 = 3.0 * BETA_C;
 const HOTSPOT_RADIUS: f32 = 50.0;
-const N_HOTSPOTS: usize = 3;
-const N_STEPS: usize = 200;
+const N_EQUILIBRATION_STEPS: usize = 100;
+const N_CHARACTER_STEPS: usize = 180;
 const N_STATES: usize = 5;
 const RGBAS: [[u8; 4]; N_STATES] = [
     [255, 48, 50, u8::MAX],
@@ -42,8 +42,11 @@ struct Model {
     rgbas: [[u8; 4]; N_STATES],
     a: Array<i8, Ix2>,
     beta: Array<f32, Ix2>,
-    hotspots: Vec<[f32; 3]>,
-    n_steps: usize,
+    hotspots: Vec<Point2>,
+    characters: Vec<char>,
+    n_equilibration_steps: usize,
+    n_character_steps: usize,
+    step: usize,
     rng: rand_pcg::Pcg64,
     texture: wgpu::Texture,
 }
@@ -82,17 +85,11 @@ fn model(app: &App) -> Model {
             beta[[i, j]] = BETA_START;
         }
     }
-    let mut hotspots: Vec<[f32; 3]> = Vec::new();
-    let mut theta: f32 = 0.0;
-    let x_mid = (x1 + x0) / 2.0;
-    let y_mid = (y1 + y0) / 2.0;
-    for _ in 0..N_HOTSPOTS {
-        let x = HOTSPOT_PATH_RADIUS * theta.cos() + x_mid;
-        let y = HOTSPOT_PATH_RADIUS * theta.sin() + y_mid;
-        hotspots.push([x, y, theta]);
-        theta += 2.0 * PI / N_HOTSPOTS as f32;
-    }
-    let n_steps: usize = N_STEPS;
+    let hotspots: Vec<Point2> = Vec::new();
+    let characters: Vec<char> = vec!['A', 'B', 'C'];
+    let n_equilibration_steps: usize = N_EQUILIBRATION_STEPS;
+    let n_character_steps: usize = N_CHARACTER_STEPS;
+    let step: usize = 0;
 
     let texture = wgpu::TextureBuilder::new()
         .size([WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32])
@@ -115,7 +112,10 @@ fn model(app: &App) -> Model {
         a,
         beta,
         hotspots,
-        n_steps,
+        characters,
+        n_equilibration_steps,
+        n_character_steps,
+        step,
         rng,
         texture,
     }
@@ -157,18 +157,46 @@ fn update(_app: &App, _model: &mut Model, _update: Update) {
         }
     }
 
-    // evolve hot patches
-    let delta_theta = 2.0 * PI / (_model.n_steps as f32);
-    let x_mid = (_model.x1 + _model.x0) / 2.0;
-    let y_mid = (_model.y1 + _model.y0) / 2.0;
-    for hs in _model.hotspots.iter_mut() {
-        let theta = hs[2] + delta_theta;
-        hs[0] = HOTSPOT_PATH_RADIUS * theta.cos() + x_mid;
-        hs[1] = HOTSPOT_PATH_RADIUS * theta.sin() + y_mid;
-        hs[2] = theta;
-        //hs[0] = HOTSPOT_PATH_RADIUS * theta.sin() + x_mid;
-        //hs[1] = HOTSPOT_PATH_RADIUS * theta.cos() + y_mid;
-        //println!("x {} y {} theta {}", hs[0], hs[1], theta);
+    if _model.step > _model.n_equilibration_steps {
+        // get points from text
+        let index = (_model.step - _model.n_equilibration_steps) / _model.n_character_steps;
+        let c: &str = &_model.characters[index % _model.characters.len()].to_string();
+        let rect = Rect::from_x_y_w_h(0.0, 0.0, _model.x1 - _model.x0, _model.y1 - _model.y0);
+        let font_size: FontSize = ((72.0 / 96.0) * rect.h()) as FontSize;
+        let text = text(c).font_size(font_size).center_justify().align_middle_y().build(rect);
+
+        // shift for vertical alignment
+        let mut min_y = 0.0;
+        let mut max_y = 0.0;
+        for event in text.path_events() {
+            let (_, from_y) = event.from().to_tuple();
+            let (_, to_y) = event.to().to_tuple();
+            min_y = min_y.min(from_y).min(to_y);
+            max_y = max_y.max(from_y).max(to_y);
+        }
+        let shift_y = (max_y + min_y) / 2.0;
+
+        // fill in hotspots
+        _model.hotspots.clear();
+        for event in text.path_events() {
+            let (from_x, from_y) = event.from().to_tuple();
+            let (to_x, to_y) = event.to().to_tuple();
+            let delta_x = to_x - from_x;
+            let delta_y = to_y - from_y;
+            let r = (delta_x*delta_x + delta_y*delta_y).sqrt();
+            let dr = 10.0;
+            let n_points: usize = (r / dr) as usize;
+            let dx = delta_x / n_points as f32;
+            let dy = delta_y / n_points as f32;
+            let mut x = from_x;
+            let mut y = from_y;
+            for _ in 0..n_points {
+                _model.hotspots.push(Point2::new(x, -y + shift_y));
+                x += dx;
+                y += dy;
+            }
+            _model.hotspots.push(Point2::new(to_x, -to_y + shift_y));
+        }
     }
 
     // compute new beta
@@ -184,6 +212,9 @@ fn update(_app: &App, _model: &mut Model, _update: Update) {
             _model.beta[[i, j]] = BETA_START * (1.0 - r / max_r).max(0.0) + BETA_END * (r / max_r).min(1.0);
         }
     }
+
+    // step
+    _model.step += 1
 }
 
 fn get_rgba(pixel_x: usize, pixel_y: usize, _model: &Model) -> [u8; 4] {
@@ -221,18 +252,20 @@ fn view(app: &App, _model: &Model, frame: Frame) {
     draw.to_frame(app, &frame).unwrap();
 
     // Capture the frame!
-    let file_path = captured_frame_path(app, &frame);
-    app.main_window().capture_frame(file_path);
+    if _model.step > _model.n_equilibration_steps {
+        let file_path = captured_frame_path(app, &frame, _model.n_equilibration_steps);
+        app.main_window().capture_frame(file_path);
+    }
 }
 
-fn captured_frame_path(app: &App, frame: &Frame) -> std::path::PathBuf {
+fn captured_frame_path(app: &App, frame: &Frame, offset: usize) -> std::path::PathBuf {
     // Create a path that we want to save this frame to.
     app.project_path()
         .expect("failed to locate `project_path`")
         // Capture all frames to a directory called `/<path_to_nannou>/nannou/simple_capture`.
         .join(app.exe_name().unwrap())
         // Name each file after the number of the frame.
-        .join(format!("{:03}", frame.nth()))
+        .join(format!("{:03}", frame.nth() - offset as u64))
         // The extension will be PNG. We also support tiff, bmp, gif, jpeg, webp and some others.
         .with_extension("png")
 }
